@@ -4,6 +4,7 @@ from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
 
+from agents.guardrails import guardrails
 from agents.retrieval import make_retrieval_tools
 from core.store import store
 
@@ -24,6 +25,7 @@ _agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     checkpointer=InMemorySaver(),
     tools=make_retrieval_tools(store),
+    middleware=guardrails(),
 )
 
 
