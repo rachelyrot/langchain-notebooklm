@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 
 from langchain.agents import create_agent
-from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
 
 from agents.guardrails import guardrails
 from agents.retrieval import make_retrieval_tools
+from core.memory import checkpointer
 from core.store import store
 
 @dataclass
@@ -23,7 +23,7 @@ SYSTEM_PROMPT = "You are the assistant for a notebook of source documents"
 _agent = create_agent(
     model=MODEL,
     system_prompt=SYSTEM_PROMPT,
-    checkpointer=InMemorySaver(),
+    checkpointer=checkpointer(),
     tools=make_retrieval_tools(store),
     middleware=guardrails(),
 )

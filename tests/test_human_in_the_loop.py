@@ -59,7 +59,6 @@ def agent(monkeypatch, store, fake_web, pages):
         checkpointer=InMemorySaver(),
     )
     monkeypatch.setattr(research, "_agent", scripted)
-    monkeypatch.setattr(research, "_PENDING", {})
     return scripted
 
 
@@ -106,6 +105,16 @@ def test_skipping_everything_still_finishes_cleanly(agent, store):
     assert done.status == "done"
     assert done.sources == []
     assert store.list() == []
+
+
+def test_the_pending_batch_is_read_back_from_the_checkpointer(agent, store):
+    """Nothing about a paused run lives in a module-level dict, so a restart is survivable."""
+    paused = research.start("solar efficiency")
+
+    recovered = research.pending(paused.run_id)
+
+    assert [c.url for c in recovered] == [c.url for c in paused.candidates]
+    assert [c.reason for c in recovered] == [c.reason for c in paused.candidates]
 
 
 def test_a_finished_run_stops_accepting_decisions(agent):

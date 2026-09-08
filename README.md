@@ -40,8 +40,9 @@ You need `ANTHROPIC_API_KEY` (chat) and `COHERE_API_KEY` (embeddings). `FIRECRAW
 is only needed for web research — without it the server still runs and everything else
 works; the Research button returns `503`.
 
-The notebook starts empty and lives in memory: add sources by pasting, uploading, or
-researching the web. **Restarting the server clears everything.**
+The notebook is kept on disk under `data/` (source records in `sources.json`, chunk
+embeddings in `chroma/`, agent memory in `memory.sqlite`), so it survives a restart.
+Delete that directory to start over.
 
 CLI (no server) — ground an answer in local files:
 
@@ -60,8 +61,8 @@ uv run pytest
 - **Chat model:** Anthropic Claude — `anthropic:claude-sonnet-4-6`, set in
   [`agents/chat.py`](src/agents/chat.py) and [`agents/research.py`](src/agents/research.py)
 - **Embeddings:** Cohere `embed-multilingual-v3.0`, in [`core/store.py`](src/core/store.py)
-- **Retrieval:** no vector database — chunks are embedded into numpy arrays in process
-  memory and ranked by cosine similarity
+- **Retrieval:** Chroma, persisted to disk, cosine distance
+- **Memory:** a SQLite checkpointer — chat threads and paused research runs survive a restart
 - **Web:** Firecrawl (`search` / `scrape` / `crawl`)
 - **Backend:** FastAPI; **client:** plain HTML/JS/CSS, no build step
 
@@ -75,6 +76,7 @@ Only these environment variables are read (`.env` is loaded automatically):
 | `COHERE_API_KEY` | — | embeddings |
 | `FIRECRAWL_API_KEY` | — | web research only |
 | `NOTEBOOKLM_EMBEDDING_MODEL` | `embed-multilingual-v3.0` | `core/store.py` |
+| `NOTEBOOKLM_DATA_DIR` | `data` | where the notebook is kept on disk |
 | `NOTEBOOKLM_HOST` | `127.0.0.1` | `api/serve.py` |
 | `NOTEBOOKLM_PORT` | `4040` | `api/serve.py` |
 | `NOTEBOOKLM_RELOAD` | `0` | `api/serve.py` (`1` enables uvicorn reload) |
@@ -95,7 +97,8 @@ src/
     retrieval.py        the retrieval tools every agent shares
   core/
     sources.py          the Source model, chunking, prompt formatting
-    store.py            the live SourceStore: embeddings, retrieval, rate limiting
+    store.py            the SourceStore: Chroma, retrieval, rate limiting
+    memory.py           the SQLite checkpointer both agents share
     web.py              Firecrawl access behind two small dataclasses
   api/
     schemas.py          the API contract shared with the client
@@ -133,9 +136,9 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 | Structured output | ✅ done — Summary + FAQ in `agents/studio.py` |
 | Studio: Infographic + PowerPoint | ⏳ planned (they need file generation) |
 | Event streaming | ⏳ planned |
-| Guardrails | ⏳ planned |
+| Guardrails | ✅ done — `agents/guardrails.py` |
+| Persistence | ✅ done — Chroma + a SQLite checkpointer |
 | MCP | ⏳ planned |
-| Persistence (vector store + checkpointer) | ⏳ planned |
 
 ## Notes on the design
 
@@ -155,7 +158,12 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 - **Retrieval spreads across sources.** A scraped review can hold 200 chunks next to a
   press release's 5, so a plain top-k would always quote the biggest document. Search
   returns `TOP_K = 8` chunks with at most `MAX_PER_SOURCE = 3` from any one source, and
-  tops up beyond the cap only when there is nothing else left to add.
+  tops up beyond the cap only when there is nothing else left to add. Each active source
+  is queried for its own best chunks and the results are merged — one global query would
+  let the big document fill the *candidate* list, crowding the others out one level above
+  the cap. The query is embedded once and reused across those queries.
+- **Nothing about a paused run lives in a variable.** The pending proposals are read back
+  out of the checkpointer, so a research run waiting for your decision survives a restart.
 - **Embedding is paced.** Several approved pages are indexed from parallel tool calls,
   and the Cohere SDK fans its own batches out concurrently, so `core/store.py` serializes
   the calls and holds them under a rolling budget of 80k tokens/minute. A single source is
@@ -164,5 +172,7 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 - **Provider errors are tool results, not exceptions.** A failed scrape or a rate-limited
   embedding comes back to the model as a message, because raising would kill the whole
   graph run and lose the pages that already succeeded.
-- **Nothing persists.** Sources, chat memory and paused research runs all live in process
-  memory; a restart is a clean slate.
+- **Guardrails protect the promise, not the model.** An answer the notebook was never
+  consulted for is refused outright: it would look like every other answer while being a
+  different product. Emails and card numbers are redacted from answers and from retrieved
+  passages, because sources are scraped off the open web.

@@ -11,14 +11,20 @@ import hashlib
 
 import pytest
 
+from langchain_core.embeddings import Embeddings
+
 import agents.research as research_module
 import core.store as store_module
-from core.store import SourceStore
+from core.store import SourceStore, ThrottledEmbeddings
 from core.web import WebPage, WebResult
 
 
-class FakeEmbeddings:
-    """Deterministic embeddings: one dimension per hashed word."""
+class FakeEmbeddings(Embeddings):
+    """Deterministic embeddings: one dimension per hashed word.
+
+    Only the provider is faked — the tests run against a real Chroma collection in a
+    temporary directory, so persistence and metadata filtering are genuinely exercised.
+    """
 
     DIM = 64
 
@@ -36,10 +42,14 @@ class FakeEmbeddings:
 
 
 @pytest.fixture
-def store(monkeypatch):
+def notebook_dir(tmp_path):
+    return tmp_path / "notebook"
+
+
+@pytest.fixture
+def store(monkeypatch, notebook_dir):
     """A fresh, empty notebook wired into every module that holds the singleton."""
-    fresh = SourceStore()
-    monkeypatch.setattr(store_module, "_embeddings", FakeEmbeddings())
+    fresh = SourceStore(data_dir=notebook_dir, embeddings=ThrottledEmbeddings(FakeEmbeddings()))
     monkeypatch.setattr(store_module, "store", fresh)
     monkeypatch.setattr(research_module, "store", fresh)
     monkeypatch.setattr(store_module, "_spent", store_module.deque())

@@ -6,16 +6,22 @@ import threading
 import time
 from collections import Counter
 
+from langchain_core.embeddings import Embeddings
+
 import core.store as store_module
+from core.store import SourceStore, ThrottledEmbeddings
+
+from conftest import FakeEmbeddings
 
 
 def test_add_indexes_and_tags_chunks_with_their_origin(store):
     source = store.add(name="pricing.md", content="Our pricing tiers are Basic and Pro.")
 
-    chunks = store._chunks[source.id]
-    assert chunks
-    assert all(c.metadata["source_id"] == source.id for c in chunks)
-    assert all(c.metadata["source_name"] == "pricing.md" for c in chunks)
+    assert source.chunks > 0
+    hits = store.search("pricing tiers")
+    assert hits
+    assert all(h.metadata["source_id"] == source.id for h in hits)
+    assert all(h.metadata["source_name"] == "pricing.md" for h in hits)
 
 
 def test_crud_round_trip(store):
@@ -62,9 +68,12 @@ def test_a_large_source_cannot_crowd_out_the_others(store):
     assert max(counts.values()) <= store_module.MAX_PER_SOURCE
     assert len(counts) >= 3, f"answer would rest on too few sources: {counts}"
 
-    # without the cap the biggest document takes every slot
-    unc = store.search("perovskite tandem efficiency record", k=4, max_per_source=4)
-    assert len({h.metadata["source_name"] for h in unc}) == 1
+    # lifting the cap lets the biggest document take more of the answer
+    uncapped = Counter(
+        h.metadata["source_name"]
+        for h in store.search("perovskite tandem efficiency record", max_per_source=store_module.TOP_K)
+    )
+    assert uncapped["big-review.md"] > counts["big-review.md"]
 
 
 def test_the_cap_does_not_starve_a_single_source_notebook(store):
@@ -75,6 +84,39 @@ def test_the_cap_does_not_starve_a_single_source_notebook(store):
     assert {h.metadata["source_name"] for h in hits} == {"only.md"}
 
 
+def test_a_notebook_survives_a_restart(notebook_dir):
+    """The point of the whole persistence layer: reopening finds everything intact."""
+    embeddings = ThrottledEmbeddings(FakeEmbeddings())
+
+    first = SourceStore(data_dir=notebook_dir, embeddings=embeddings)
+    kept = first.add(name="pricing.md", content="Our pricing tiers are Basic and Pro.", url="https://p")
+    dropped = first.add(name="hiring.md", content="We hired twelve engineers this quarter.")
+    first.set_active(dropped.id, False)
+
+    reopened = SourceStore(data_dir=notebook_dir, embeddings=embeddings)
+
+    assert {s.name for s in reopened.list()} == {"pricing.md", "hiring.md"}
+    assert reopened.get(kept.id).content == kept.content, "the full text must come back"
+    assert reopened.find_by_url("https://p").id == kept.id
+    assert reopened.active_ids() == [kept.id], "the active flag survived too"
+
+    hits = reopened.search("pricing tiers")
+    assert hits and hits[0].metadata["source_name"] == "pricing.md"
+
+
+def test_removing_a_source_takes_its_chunks_with_it(notebook_dir):
+    embeddings = ThrottledEmbeddings(FakeEmbeddings())
+    store = SourceStore(data_dir=notebook_dir, embeddings=embeddings)
+    doomed = store.add(name="gone.md", content="Perovskite tandem efficiency records. " * 20)
+    store.add(name="kept.md", content="Battery storage costs fell sharply. " * 20)
+
+    assert store.remove(doomed.id) is True
+
+    reopened = SourceStore(data_dir=notebook_dir, embeddings=embeddings)
+    hits = reopened.search("perovskite tandem efficiency")
+    assert all(h.metadata["source_name"] != "gone.md" for h in hits), "orphan chunks left behind"
+
+
 def test_oversized_content_is_truncated(store):
     source = store.add(name="huge.md", content="x " * store_module.MAX_SOURCE_CHARS)
 
@@ -82,12 +124,12 @@ def test_oversized_content_is_truncated(store):
     assert source.content.endswith("[… truncated]")
 
 
-def test_embedding_calls_are_serialized_and_paced(store, monkeypatch):
+def test_embedding_calls_are_serialized_and_paced(notebook_dir, monkeypatch):
     """Parallel indexing must not spend the same per-minute allowance twice."""
     calls: list[tuple[float, int]] = []
     lock = threading.Lock()
 
-    class Counting:
+    class Counting(Embeddings):
         def embed_documents(self, texts):
             with lock:
                 calls.append((time.monotonic(), sum(len(t) for t in texts) // 4))
@@ -96,9 +138,10 @@ def test_embedding_calls_are_serialized_and_paced(store, monkeypatch):
         def embed_query(self, text):
             return [1.0] * 8
 
-    monkeypatch.setattr(store_module, "_embeddings", Counting())
     monkeypatch.setattr(store_module, "EMBED_WINDOW", 1.0)
     monkeypatch.setattr(store_module, "EMBED_TOKEN_BUDGET", 4_000)
+    monkeypatch.setattr(store_module, "_spent", store_module.deque())
+    store = SourceStore(data_dir=notebook_dir, embeddings=ThrottledEmbeddings(Counting()))
 
     # ~2.4k tokens per page: one fits inside the budget, two in the same window do not
     page = "efficiency data " * 500

@@ -28,6 +28,7 @@ class Source:
     content: str
     active: bool = True
     url: str | None = None
+    chunks: int = 0  # how many chunks it was split into — the store deletes them by id
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
 
@@ -37,17 +38,17 @@ _splitter = RecursiveCharacterTextSplitter(
 
 
 def split_source(source: Source) -> list[Document]:
-    """Split a source into retrievable chunks, each tagged with its origin."""
+    """Split a source into retrievable chunks, each tagged with its origin.
+
+    ``url`` is left out entirely when there is none: the vector store rejects null
+    metadata values, so an absent key is the only way to say "not from the web".
+    """
+    origin = {"source_id": source.id, "source_name": source.name}
+    if source.url:
+        origin["url"] = source.url
+
     return [
-        Document(
-            page_content=text,
-            metadata={
-                "source_id": source.id,
-                "source_name": source.name,
-                "url": source.url,
-                "chunk": i,
-            },
-        )
+        Document(page_content=text, metadata={**origin, "chunk": i})
         for i, text in enumerate(_splitter.split_text(source.content))
     ]
 

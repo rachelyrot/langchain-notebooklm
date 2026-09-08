@@ -20,9 +20,9 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware, InterruptOnConfig
 from langchain_core.messages import AnyMessage, ToolMessage
 from langchain_core.tools import tool
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from core.memory import checkpointer
 from core.sources import Source
 from core.store import store
 from core.web import CRAWL_LIMIT, WebUnavailable, crawl, scrape, search
@@ -188,12 +188,23 @@ _agent = create_agent(
     middleware=[
         HumanInTheLoopMiddleware(interrupt_on={"scrape_page": _review, "crawl_site": _review})
     ],
-    checkpointer=InMemorySaver(),
+    checkpointer=checkpointer(),
 )
 
-# run_id -> the batch the run is currently paused on. A decision is only meaningful
-# against the batch it was shown for, so it is kept beside the run, not in the client.
-_PENDING: dict[str, list[Candidate]] = {}
+def _config(run_id: str) -> dict[str, Any]:
+    return {"configurable": {"thread_id": run_id}, "recursion_limit": RECURSION_LIMIT}
+
+
+def pending(run_id: str) -> list[Candidate] | None:
+    """The batch a run is paused on, read back from the checkpointer.
+
+    Deliberately not cached in a module-level dict: the interrupt is already durable
+    state, so reading it from there is what lets a paused run outlive a restart.
+    """
+    snapshot = _agent.get_state(_config(run_id))
+    if not snapshot.interrupts:
+        return None
+    return _candidates_of(snapshot.interrupts[0].value)
 
 REJECTED = (
     "The person reviewed this page and chose not to add it. That is their decision — "
@@ -232,24 +243,18 @@ def _candidates_of(interrupt_value: dict[str, Any]) -> list[Candidate]:
 
 def _run(run_id: str, payload: Any) -> Research:
     """Advance a run until it either needs the person or finishes."""
-    result = _agent.invoke(
-        payload,
-        config={"configurable": {"thread_id": run_id}, "recursion_limit": RECURSION_LIMIT},
-    )
+    result = _agent.invoke(payload, config=_config(run_id))
     messages = result.get("messages", [])
 
     interrupts = result.get("__interrupt__") or ()
     if interrupts:
-        candidates = _candidates_of(interrupts[0].value)
-        _PENDING[run_id] = candidates
         return Research(
             run_id=run_id,
             status="awaiting_selection",
             sources=_added_sources(messages),
-            candidates=candidates,
+            candidates=_candidates_of(interrupts[0].value),
         )
 
-    _PENDING.pop(run_id, None)
     return Research(
         run_id=run_id,
         status="done",
@@ -274,7 +279,7 @@ def decide(run_id: str, approved: list[int]) -> Research:
     the batch is rejected. The middleware wants exactly one decision per proposal, in the
     order the proposals were made.
     """
-    candidates = _PENDING.get(run_id)
+    candidates = pending(run_id)
     if candidates is None:
         raise UnknownRun(f"Research run {run_id} is not waiting for a selection.")
 
