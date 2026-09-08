@@ -11,11 +11,14 @@ part of the chat.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from langchain.agents import create_agent
 from pydantic import BaseModel, Field
 
+from agents import artifacts
 from agents.retrieval import make_retrieval_tools
 from core.store import store
 
@@ -69,12 +72,50 @@ class Faq(BaseModel):
     items: list[FaqItem] = Field(description="6-10 questions, ordered from basic to specific.")
 
 
+class Stat(BaseModel):
+    """A single number worth putting in large type."""
+
+    value: str = Field(description="The figure itself, short: '34.85%', '3 of 5', '2025'.")
+    label: str = Field(description="What the figure measures, a few words.")
+    source: str = Field(description="Name of the source document it came from.")
+
+
+class Section(BaseModel):
+    heading: str = Field(description="A short heading, a few words.")
+    points: list[str] = Field(description="2-4 short lines. Not paragraphs.")
+
+
+class Infographic(BaseModel):
+    """A one-page visual summary: figures first, then a little structure."""
+
+    title: str = Field(description="A specific title naming the actual subject matter.")
+    subtitle: str = Field(description="One line of context under the title.")
+    stats: list[Stat] = Field(description="3-5 concrete figures from the sources.")
+    sections: list[Section] = Field(description="2-4 sections of short points.")
+    takeaway: str = Field(description="The single sentence to remember.")
+
+
+class Slide(BaseModel):
+    title: str = Field(description="The slide's heading.")
+    bullets: list[str] = Field(description="3-5 bullets, one line each. Not sentences to read aloud.")
+    source: str = Field(description="Name of the source document this slide rests on.")
+
+
+class Deck(BaseModel):
+    """A short presentation over the notebook."""
+
+    title: str = Field(description="A specific title naming the actual subject matter.")
+    subtitle: str = Field(description="One line of context for the title slide.")
+    slides: list[Slide] = Field(description="5-8 slides that build an argument in order.")
+
+
 @dataclass
 class Artifact:
-    """A generated artifact, ready to be saved as a note."""
+    """A generated artifact: markdown for the notes panel, plus a file when it is one."""
 
     title: str
     content: str  # markdown
+    file: object | None = None  # artifacts.StoredFile, when the artifact is a file
 
 
 # -- rendering -----------------------------------------------------------------
@@ -97,6 +138,25 @@ def _render_faq(faq: Faq) -> str:
     return "\n\n".join(blocks)
 
 
+def _render_infographic(data: Infographic) -> str:
+    """The note that accompanies the file: the same content, readable as text."""
+    lines = [data.subtitle, ""]
+    lines += [f"**{s.value}** — {s.label}  \n  *— {s.source}*" for s in data.stats]
+    for section in data.sections:
+        lines += ["", f"## {section.heading}"] + [f"- {p}" for p in section.points]
+    lines += ["", f"**Takeaway:** {data.takeaway}"]
+    return "\n".join(lines)
+
+
+def _render_deck(deck: Deck) -> str:
+    lines = [deck.subtitle]
+    for i, slide in enumerate(deck.slides, 1):
+        lines += ["", f"## {i}. {slide.title}"]
+        lines += [f"- {b}" for b in slide.bullets]
+        lines.append(f"*— {slide.source}*")
+    return "\n".join(lines)
+
+
 # -- the agents ----------------------------------------------------------------
 
 
@@ -109,14 +169,46 @@ def _build(schema: type[BaseModel], task: str):
     )
 
 
-_AGENTS = {
-    "summary": (
+@dataclass
+class Kind:
+    """How one artifact is produced: which agent, how it reads, and what file it makes."""
+
+    agent: Any
+    to_markdown: Callable[[Any], str]
+    to_file: Callable[[Any], bytes] | None = None
+    extension: str = ""
+
+
+_AGENTS: dict[str, Kind] = {
+    "summary": Kind(
         _build(Summary, "Your artifact is a summary of the whole notebook."),
         _render_summary,
     ),
-    "faq": (
+    "faq": Kind(
         _build(Faq, "Your artifact is a FAQ: the questions this material answers."),
         _render_faq,
+    ),
+    "infographic": Kind(
+        _build(
+            Infographic,
+            "Your artifact is a one-page infographic. Lead with concrete figures pulled "
+            "from the sources — a section with no numbers in it is a section that belongs "
+            "in the summary instead. Keep every line short enough to read at a glance.",
+        ),
+        _render_infographic,
+        artifacts.render_infographic,
+        ".html",
+    ),
+    "powerpoint": Kind(
+        _build(
+            Deck,
+            "Your artifact is a short slide deck. The slides should build an argument in "
+            "order rather than list facts. Bullets are headlines, not sentences to be "
+            "read aloud.",
+        ),
+        _render_deck,
+        artifacts.render_deck,
+        ".pptx",
     ),
 }
 
@@ -134,11 +226,17 @@ def generate(kind: str) -> Artifact:
     if not store.active_ids():
         raise EmptyNotebook("Enable at least one source before generating an artifact.")
 
-    agent, render = _AGENTS[kind]
-    result = agent.invoke(
+    spec = _AGENTS[kind]
+    result = spec.agent.invoke(
         {"messages": [{"role": "user", "content": "Build the artifact."}]},
         config={"recursion_limit": RECURSION_LIMIT},
     )
 
     structured = result["structured_response"]
-    return Artifact(title=structured.title, content=render(structured))
+    stored = None
+    if spec.to_file is not None:
+        stored = artifacts.store_file(
+            spec.to_file(structured), structured.title, spec.extension
+        )
+
+    return Artifact(title=structured.title, content=spec.to_markdown(structured), file=stored)

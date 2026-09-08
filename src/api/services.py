@@ -15,6 +15,7 @@ from api.schemas import (
     ChatRequest,
     ChatResponse,
     Citation,
+    GeneratedArtifact,
     Note,
     ResearchCandidate,
     ResearchDecision,
@@ -157,7 +158,7 @@ def list_artifacts() -> list[ArtifactKind]:
     return ARTIFACTS
 
 
-def generate_artifact(kind: str, impl: str) -> Note:
+def generate_artifact(kind: str, impl: str) -> GeneratedArtifact:
     """Build an artifact from the active sources and keep it as a note."""
     if kind not in studio.KINDS:
         artifact = _ARTIFACTS_BY_KEY.get(kind)
@@ -165,7 +166,12 @@ def generate_artifact(kind: str, impl: str) -> Note:
         raise ComingSoon(f"{title} generation is coming soon.")
 
     result = studio.generate(kind)
-    return add_note(title=result.title, content=result.content)
+    return GeneratedArtifact(
+        kind=kind,
+        note=add_note(title=result.title, content=result.content),
+        download_url=result.file.url if result.file else None,
+        download_name=result.file.download_name if result.file else None,
+    )
 
 
 # -- notes ---------------------------------------------------------------------

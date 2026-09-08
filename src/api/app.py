@@ -35,7 +35,7 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import services
@@ -46,6 +46,7 @@ from api.schemas import (
     ChatRequest,
     ChatResponse,
     GenerateArtifactRequest,
+    GeneratedArtifact,
     Note,
     ResearchDecision,
     ResearchRequest,
@@ -54,7 +55,7 @@ from api.schemas import (
     SourceDetail,
     SourceInfo,
 )
-from agents import research, studio
+from agents import artifacts, research, studio
 from core.web import WebUnavailable
 
 app = FastAPI(title="NotebookLM (LangChain learning project)")
@@ -189,8 +190,8 @@ def studio_artifacts() -> list[ArtifactKind]:
     return services.list_artifacts()
 
 
-@app.post("/api/studio/generate", response_model=Note)
-def studio_generate(req: GenerateArtifactRequest) -> Note:
+@app.post("/api/studio/generate", response_model=GeneratedArtifact)
+def studio_generate(req: GenerateArtifactRequest) -> GeneratedArtifact:
     """Build an artifact from the active sources; it is saved as a note."""
     try:
         return services.generate_artifact(req.kind, req.impl)
@@ -200,6 +201,19 @@ def studio_generate(req: GenerateArtifactRequest) -> Note:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+@app.get("/api/studio/download/{file_id}")
+def studio_download(file_id: str) -> FileResponse:
+    """Serve a generated file. Ids are generated, so anything malformed is simply a 404."""
+    path = artifacts.resolve(file_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="That artifact is no longer available.")
+    return FileResponse(
+        path,
+        media_type=artifacts.MEDIA_TYPES.get(path.suffix, "application/octet-stream"),
+        filename=path.name,
+    )
 
 
 # -- notes ---------------------------------------------------------------------

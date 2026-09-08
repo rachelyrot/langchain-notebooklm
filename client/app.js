@@ -252,7 +252,7 @@ function addMessage(role, text, { pending = false } = {}) {
   clearEmptyState();
   const div = document.createElement("div");
   div.className = `msg ${role}${pending ? " pending" : ""}`;
-  div.textContent = text;
+  div.textContent = text; // text, never HTML — sources are scraped from the open web
   $("messages").appendChild(div);
   $("messages").scrollTop = $("messages").scrollHeight;
   return div;
@@ -369,6 +369,26 @@ async function loadArtifacts() {
   }
 }
 
+// An HTML infographic is worth opening in place; a .pptx is only worth downloading.
+function downloadLink(url, name, kind) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg-actions";
+
+  const link = document.createElement("a");
+  link.className = "link-btn";
+  link.href = url;
+  if (kind === "infographic") {
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "↗ Open the infographic";
+  } else {
+    link.download = name || "";
+    link.textContent = `⬇ Download ${name || "the file"}`;
+  }
+  wrapper.appendChild(link);
+  return wrapper;
+}
+
 // A generated artifact is saved as a note and opened straight away — the agent returns a
 // structured object, so the note's markdown is rendered from fields, not from prose.
 async function generateArtifact(a, btn) {
@@ -380,9 +400,17 @@ async function generateArtifact(a, btn) {
   btn.classList.add("busy");
   addMessage("system", `🛠 Building the ${a.title.toLowerCase()} from your active sources…`);
   try {
-    const note = await api.send("POST", "/api/studio/generate", { kind: a.key });
+    const result = await api.send("POST", "/api/studio/generate", { kind: a.key });
     await loadNotes();
-    openViewer(note.title, note.content);
+
+    if (result.download_url) {
+      // an infographic or a deck: the note holds the text, the file is the artifact
+      addMessage("system", `📦 ${result.note.title}`).appendChild(
+        downloadLink(result.download_url, result.download_name, a.key)
+      );
+    } else {
+      openViewer(result.note.title, result.note.content);
+    }
   } catch (e) {
     addMessage("system", `⚠ ${e.message}`);
   } finally {

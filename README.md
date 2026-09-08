@@ -23,10 +23,11 @@ A NotebookLM-style 3-panel workspace, with a real client/server split:
   (retrieval is scoped to them), view or remove a source.
 - **Chat** — the main product: a single conversational agent for grounded Q&A with
   citations and short-term memory; save any answer to a note.
-- **Studio** — **Summary** and **FAQ** are built: each is a standalone, stateless agent
-  that returns a Pydantic object (`response_format`) rather than prose, which is then
-  rendered to markdown in code and saved as a note. **Infographic** and **PowerPoint**
-  still return `501` and are marked "Soon" in the UI.
+- **Studio** — **Summary · FAQ · Infographic · PowerPoint**. Each is a standalone,
+  stateless agent that returns a Pydantic object (`response_format`) rather than prose.
+  The object is then rendered in code: to markdown for the notes panel, and for the last
+  two also to a file — a self-contained HTML page, or a `.pptx` built with `python-pptx` —
+  served back from `/api/studio/download/{id}`.
 
 ## Quick start
 
@@ -94,6 +95,7 @@ src/
     chat.py             the conversational chat agent (tools + short-term memory)
     research.py         web research + the human-in-the-loop selection step
     studio.py           artifact agents: a Pydantic shape per artifact
+    artifacts.py        rendering those shapes to .html / .pptx, and serving them
     retrieval.py        the retrieval tools every agent shares
   core/
     sources.py          the Source model, chunking, prompt formatting
@@ -118,7 +120,8 @@ PATCH  /api/sources/{id}   (toggle)        DELETE /api/sources/{id}
 POST   /api/sources/research               → pages to choose from (or a finished run)
 POST   /api/sources/research/{run_id}/decide  → accept the picks, drop the rest
 POST   /api/chat                           POST /api/chat/stream      (SSE)
-GET    /api/studio/artifacts               POST /api/studio/generate  (→ a note; 501 if unbuilt)
+GET    /api/studio/artifacts               POST /api/studio/generate  (→ a note, maybe a file)
+GET    /api/studio/download/{file_id}      the generated .html / .pptx
 GET    /api/notes                          POST /api/notes            DELETE /api/notes/{id}
 ```
 
@@ -133,8 +136,7 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 | Web research | ✅ done — `agents/research.py` (needs `FIRECRAWL_API_KEY`) |
 | Middlewares | ✅ done — `HumanInTheLoopMiddleware` on the research agent |
 | Human in the loop | ✅ done — you pick which proposed pages become sources |
-| Structured output | ✅ done — Summary + FAQ in `agents/studio.py` |
-| Studio: Infographic + PowerPoint | ⏳ planned (they need file generation) |
+| Structured output | ✅ done — all four artifacts in `agents/studio.py` |
 | Event streaming | ✅ done — `POST /api/chat/stream`, server-sent events |
 | Guardrails | ✅ done — `agents/guardrails.py` |
 | Persistence | ✅ done — Chroma + a SQLite checkpointer |
@@ -149,9 +151,9 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
   last human message onward.
 - **An artifact is a shape, not a document.** A Studio agent is given a Pydantic schema
   as `response_format`, so the model fills in fields — key points with their source,
-  disagreements between sources, open questions — and the markdown is rendered from those
-  fields in code. The same artifact could be rendered as a deck or a web page without
-  asking the model again.
+  disagreements between sources, open questions — and every output format is then a
+  function of that data: markdown for the notes panel, an HTML page, a `.pptx`. The model
+  writes the content once and is never asked to produce layout.
 - **A paused research run survives between HTTP requests.** The interrupt lives in the
   agent's checkpointer under a `run_id`; the client sends the picks back to
   `/decide`, which resumes the graph with `Command(resume={"decisions": [...]})`.

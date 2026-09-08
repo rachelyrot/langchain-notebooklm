@@ -76,18 +76,17 @@ def test_an_unknown_kind_is_rejected(store):
         studio.generate("nonsense")
 
 
-def test_ready_and_planned_artifacts_are_reported_honestly():
-    by_key = {a.key: a for a in services.list_artifacts()}
+def test_every_advertised_artifact_is_actually_built():
+    """The panel must not offer something the backend answers 501 for."""
+    advertised = {a.key for a in services.list_artifacts()}
 
-    assert by_key["summary"].status == "ready"
-    assert by_key["faq"].status == "ready"
-    assert by_key["infographic"].status == "planned"
-    assert by_key["powerpoint"].status == "planned"
+    assert advertised == set(studio.KINDS)
+    assert all(a.status == "ready" for a in services.list_artifacts())
 
 
-def test_an_unbuilt_artifact_still_says_coming_soon():
+def test_an_artifact_nobody_built_still_says_coming_soon():
     with pytest.raises(services.ComingSoon):
-        services.generate_artifact("powerpoint", "A")
+        services.generate_artifact("hologram", "A")
 
 
 def test_a_generated_artifact_is_saved_as_a_note(store, monkeypatch):
@@ -97,12 +96,32 @@ def test_a_generated_artifact_is_saved_as_a_note(store, monkeypatch):
         lambda kind: studio.Artifact(title="Built title", content="# Built body"),
     )
 
-    note = services.generate_artifact("summary", "A")
+    result = services.generate_artifact("summary", "A")
 
-    assert note.title == "Built title"
-    assert note.content == "# Built body"
-    assert note.id in {n.id for n in services.list_notes()}
-    services.remove_note(note.id)
+    assert result.kind == "summary"
+    assert result.note.title == "Built title"
+    assert result.note.content == "# Built body"
+    assert result.download_url is None, "a text artifact has no file"
+    assert result.note.id in {n.id for n in services.list_notes()}
+    services.remove_note(result.note.id)
+
+
+def test_a_file_artifact_carries_a_download_url(store, monkeypatch):
+    stored = studio.artifacts.StoredFile(
+        file_id="0123456789abcdef.pptx", path=None, download_name="deck.pptx"
+    )
+    monkeypatch.setattr(
+        studio,
+        "generate",
+        lambda kind: studio.Artifact(title="Deck", content="outline", file=stored),
+    )
+
+    result = services.generate_artifact("powerpoint", "A")
+
+    assert result.download_url == "/api/studio/download/0123456789abcdef.pptx"
+    assert result.download_name == "deck.pptx"
+    assert result.note.content == "outline", "the text still lands in the notes panel"
+    services.remove_note(result.note.id)
 
 
 def test_the_generate_request_defaults_its_impl():

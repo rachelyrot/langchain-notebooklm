@@ -121,6 +121,8 @@ class GenerateArtifactRequest(BaseModel):
     impl: Impl = "A"
 
 
+
+
 # -- notes ---------------------------------------------------------------------
 
 
@@ -133,4 +135,17 @@ class Note(BaseModel):
 class AddNoteRequest(BaseModel):
     title: str
     content: str
+
+
+class GeneratedArtifact(BaseModel):
+    """A generated artifact.
+
+    Every artifact is saved as a note, so it lands somewhere the user can find it again.
+    The ones that are files — an infographic, a deck — also carry a URL to fetch them from.
+    """
+
+    kind: str
+    note: Note
+    download_url: str | None = None
+    download_name: str | None = None
 
