@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NotebookLM</title>
+    <link rel="stylesheet" href="/styles.css?v=4" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">📓 <strong>NotebookLM</strong> <span class="muted">· grounded research</span></div>
+    </header>
+
+    <main class="layout">
+      <!-- SOURCES ------------------------------------------------------------>
+      <aside class="panel sources">
+        <div class="panel-head">
+          <h2>Sources</h2>
+          <button id="add-toggle" class="pill-btn">+ Add</button>
+        </div>
+
+        <form id="add-form" class="add-form hidden">
+          <input id="add-name" type="text" placeholder="Title (optional)" />
+          <textarea id="add-content" rows="4" placeholder="Paste source text…"></textarea>
+          <div class="add-actions">
+            <button type="submit" class="pill-btn primary">Add text</button>
+            <label class="pill-btn file">
+              Upload<input id="add-file" type="file" accept=".md,.txt,text/*" hidden />
+            </label>
+            <button type="button" id="add-cancel" class="pill-btn">Cancel</button>
+          </div>
+
+          <div class="add-sep"><span>or research the web</span></div>
+          <input id="research-topic" type="text" placeholder="Topic to research…" />
+          <div class="add-actions">
+            <button type="button" id="research-btn" class="pill-btn primary">🔎 Research</button>
+            <span id="research-status" class="muted small"></span>
+          </div>
+        </form>
+
+        <div class="select-row">
+          <label><input type="checkbox" id="select-all" /> Select all</label>
+          <span id="active-count" class="muted"></span>
+        </div>
+
+        <ul id="sources" class="source-list"></ul>
+      </aside>
+
+      <!-- CHAT --------------------------------------------------------------->
+      <section class="panel chat">
+        <div class="panel-head">
+          <h2>Chat</h2>
+          <button id="new-chat" class="pill-btn">New chat</button>
+        </div>
+        <div id="messages" class="messages"></div>
+        <form id="chat-form" class="composer">
+          <input id="chat-input" type="text" autocomplete="off"
+                 placeholder="Ask about your sources…" />
+          <button type="submit" id="send">➤</button>
+        </form>
+      </section>
+
+      <!-- STUDIO ------------------------------------------------------------->
+      <aside class="panel studio">
+        <div class="panel-head"><h2>Studio</h2></div>
+        <p class="muted small">Generate grounded artifacts from your sources.</p>
+        <div id="artifacts" class="artifact-grid"></div>
+        <div class="panel-head"><h2>Notes</h2></div>
+        <ul id="notes" class="note-list"></ul>
+      </aside>
+    </main>
+
+    <!-- SOURCE / NOTE VIEWER MODAL ------------------------------------------>
+    <div id="viewer" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="viewer-title">Source</h3>
+          <button id="close-viewer" class="ghost-btn">✕</button>
+        </div>
+        <pre id="viewer-content" class="viewer-content"></pre>
+      </div>
+    </div>
+
+    <!-- RESEARCH PICKER — the human-in-the-loop step: the agent proposes, you choose -->
+    <div id="picker" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="picker-title">Choose sources to add</h3>
+          <button id="close-picker" class="ghost-btn">✕</button>
+        </div>
+        <p class="muted small picker-note">
+          Nothing is fetched until you decide. Unpicked pages are dropped and won't be
+          proposed again.
+        </p>
+        <ul id="picker-list" class="picker-list"></ul>
+        <div class="picker-actions">
+          <label class="picker-all"><input type="checkbox" id="picker-select-all" checked /> Select all</label>
+          <span class="picker-spacer"></span>
+          <button id="picker-skip" class="pill-btn">Skip all</button>
+          <button id="picker-add" class="pill-btn primary">Add selected</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="overlay" class="overlay hidden"></div>
+
+    <script src="/app.js?v=4"></script>
+  </body>
+</html>
