@@ -31,9 +31,11 @@ from __future__ import annotations
 from netfree_unstrict_ssl import unstrict_ssl
 unstrict_ssl()
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import services
@@ -158,6 +160,25 @@ def delete_source(source_id: str) -> dict[str, bool]:
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     return services.run_chat(req)
+
+
+@app.post("/api/chat/stream")
+def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """The same answer, as server-sent events: tool calls, then the answer as it is written.
+
+    ``X-Accel-Buffering`` keeps a reverse proxy from holding the events back; without it
+    a buffered deployment turns streaming back into one long wait.
+    """
+
+    def events():
+        for event in services.stream_chat(req):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # -- studio --------------------------------------------------------------------

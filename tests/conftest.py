@@ -8,12 +8,14 @@ which is all the retrieval tests need.
 from __future__ import annotations
 
 import hashlib
+import uuid
 
 import pytest
 
 from langchain_core.embeddings import Embeddings
 
 import agents.research as research_module
+import agents.studio as studio_module
 import core.store as store_module
 from core.store import SourceStore, ThrottledEmbeddings
 from core.web import WebPage, WebResult
@@ -50,10 +52,18 @@ def notebook_dir(tmp_path):
 def store(monkeypatch, notebook_dir):
     """A fresh, empty notebook wired into every module that holds the singleton."""
     fresh = SourceStore(data_dir=notebook_dir, embeddings=ThrottledEmbeddings(FakeEmbeddings()))
+    # every module that imported the singleton by name holds its own reference
     monkeypatch.setattr(store_module, "store", fresh)
     monkeypatch.setattr(research_module, "store", fresh)
+    monkeypatch.setattr(studio_module, "store", fresh)
     monkeypatch.setattr(store_module, "_spent", store_module.deque())
     return fresh
+
+
+@pytest.fixture
+def unique_thread():
+    """A thread id no other test has used — the checkpointer is a real, shared file."""
+    return f"test-{uuid.uuid4().hex[:8]}"
 
 
 @pytest.fixture

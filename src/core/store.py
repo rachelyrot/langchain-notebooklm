@@ -105,6 +105,7 @@ class SourceStore:
         self._dir = Path(data_dir) if data_dir is not None else DATA_DIR
         self._embeddings = embeddings
         self._vectorstore = None
+        self._open_lock = threading.Lock()
         self._sources: dict[str, Source] = self._read()
 
     # -- persistence -----------------------------------------------------------
@@ -136,8 +137,16 @@ class SourceStore:
 
     @property
     def _vectors(self):
-        """The Chroma collection, opened on first use."""
-        if self._vectorstore is None:
+        """The Chroma collection, opened on first use.
+
+        Locked because the research agent indexes several approved pages from parallel
+        tool calls: without it they race to create the client, and Chroma's own client
+        registry is not safe against that.
+        """
+        with self._open_lock:
+            if self._vectorstore is not None:
+                return self._vectorstore
+
             from langchain_chroma import Chroma
 
             if self._embeddings is None:
@@ -150,7 +159,7 @@ class SourceStore:
                 # distance, and the two only agree when every vector is normalized.
                 collection_configuration={"hnsw": {"space": "cosine"}},
             )
-        return self._vectorstore
+            return self._vectorstore
 
     # -- source management -----------------------------------------------------
 

@@ -279,18 +279,71 @@ function decorateAnswer(div, data) {
   div.appendChild(actions);
 }
 
+// Reads a server-sent-event stream from a POST. EventSource would force the request
+// into a GET, so the body is streamed back through fetch instead.
+async function* sseEvents(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await err(response);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop(); // the last one may still be arriving
+    for (const frame of frames) {
+      const line = frame.split("\n").find((l) => l.startsWith("data: "));
+      if (line) yield JSON.parse(line.slice(6));
+    }
+  }
+}
+
 async function sendMessage(message) {
   addMessage("user", message);
-  const pending = addMessage("ai", "thinking…", { pending: true });
+  const bubble = addMessage("ai", "thinking…", { pending: true });
   $("send").disabled = true;
+
+  let answer = "";
+  const paint = () => {
+    bubble.className = "msg ai";
+    bubble.textContent = answer;
+    $("messages").scrollTop = $("messages").scrollHeight;
+  };
+
   try {
-    const data = await api.send("POST", "/api/chat", {
+    for await (const event of sseEvents("/api/chat/stream", {
       message,
       thread_id: state.threadId,
-    });
-    decorateAnswer(pending, data);
+    })) {
+      if (event.type === "tool") {
+        bubble.textContent = `searching your sources for “${event.args?.query ?? ""}”…`;
+      } else if (event.type === "token") {
+        answer += event.text;
+        paint();
+      } else if (event.type === "replace") {
+        // a guardrail rewrote the answer after it had already been streamed
+        answer = event.text;
+        paint();
+      } else if (event.type === "error") {
+        throw new Error(event.detail);
+      } else if (event.type === "done") {
+        decorateAnswer(bubble, {
+          answer,
+          citations: event.sources.map((source) => ({ source })),
+        });
+      }
+    }
   } catch (e) {
-    pending.remove();
+    bubble.remove();
     addMessage("system", `⚠ ${e.message}`);
   } finally {
     $("send").disabled = false;

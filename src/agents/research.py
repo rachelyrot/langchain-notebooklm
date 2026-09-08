@@ -213,15 +213,24 @@ REJECTED = (
 
 
 def _added_sources(messages: list[AnyMessage]) -> list[Source]:
-    """The sources the tools actually indexed, in order, without duplicates."""
+    """The sources the tools actually indexed, in order, without duplicates.
+
+    The artifacts carry ids rather than usable records once a run has been through the
+    checkpointer, so the store — which is the durable copy anyway — is asked for each.
+    """
     added: list[Source] = []
     seen: set[str] = set()
     for message in messages:
         if isinstance(message, ToolMessage) and message.artifact:
-            for source in message.artifact:
-                if source.id not in seen:
-                    seen.add(source.id)
-                    added.append(source)
+            for item in message.artifact:
+                source_id = getattr(item, "id", None)
+                if source_id is None and isinstance(item, dict):
+                    source_id = item.get("id")
+
+                live = store.get(source_id) if source_id else None
+                if live is not None and live.id not in seen:
+                    seen.add(live.id)
+                    added.append(live)
     return added
 
 

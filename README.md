@@ -117,7 +117,7 @@ POST   /api/sources/upload                 GET  /api/sources/{id}     (full cont
 PATCH  /api/sources/{id}   (toggle)        DELETE /api/sources/{id}
 POST   /api/sources/research               → pages to choose from (or a finished run)
 POST   /api/sources/research/{run_id}/decide  → accept the picks, drop the rest
-POST   /api/chat
+POST   /api/chat                           POST /api/chat/stream      (SSE)
 GET    /api/studio/artifacts               POST /api/studio/generate  (→ a note; 501 if unbuilt)
 GET    /api/notes                          POST /api/notes            DELETE /api/notes/{id}
 ```
@@ -135,7 +135,7 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 | Human in the loop | ✅ done — you pick which proposed pages become sources |
 | Structured output | ✅ done — Summary + FAQ in `agents/studio.py` |
 | Studio: Infographic + PowerPoint | ⏳ planned (they need file generation) |
-| Event streaming | ⏳ planned |
+| Event streaming | ✅ done — `POST /api/chat/stream`, server-sent events |
 | Guardrails | ✅ done — `agents/guardrails.py` |
 | Persistence | ✅ done — Chroma + a SQLite checkpointer |
 | MCP | ⏳ planned |
@@ -172,6 +172,12 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 - **Provider errors are tool results, not exceptions.** A failed scrape or a rate-limited
   embedding comes back to the model as a message, because raising would kill the whole
   graph run and lose the pages that already succeeded.
+- **Streaming has to be able to take it back.** The chat streams `tool` events (so the
+  wait is legible: you see which query is running), then the answer token by token. But
+  guardrails run *after* the model, so an answer can be refused once its tokens have
+  already left for the browser — the stream ends with a `replace` event and the client
+  drops what it showed. Anything that rewrites an answer needs this, or streaming and
+  guardrails quietly contradict each other.
 - **Guardrails protect the promise, not the model.** An answer the notebook was never
   consulted for is refused outright: it would look like every other answer while being a
   different product. Emails and card numbers are redacted from answers and from retrieved

@@ -8,6 +8,7 @@ agent; Studio artifacts raise ``ComingSoon`` until structured output lands in st
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 
 from api.schemas import (
     ArtifactKind,
@@ -110,17 +111,30 @@ def _auto_name(content: str) -> str:
 # -- chat ----------------------------------------------------------------------
 
 
+NO_SOURCES = "No active sources. Enable at least one source on the left to chat."
+
+
 def run_chat(req: ChatRequest) -> ChatResponse:
-    """Answer a chat turn with the stage-2 agent, grounded in the active sources."""
+    """Answer a chat turn with the chat agent, grounded in the active sources."""
     if not store.active_ids():
-        return ChatResponse(
-            answer="No active sources. Enable at least one source on the left to chat.",
-            engine="chat",
-        )
+        return ChatResponse(answer=NO_SOURCES, engine="chat")
 
     result = chat.answer(req.message, thread_id=req.thread_id or "default")
     citations = [Citation(source=name) for name in result.sources]
     return ChatResponse(answer=result.text, citations=citations, engine="chat")
+
+
+def stream_chat(req: ChatRequest) -> Iterator[dict]:
+    """The same turn as ``run_chat``, event by event, for the streaming endpoint."""
+    if not store.active_ids():
+        yield {"type": "token", "text": NO_SOURCES}
+        yield {"type": "done", "sources": []}
+        return
+
+    try:
+        yield from chat.stream(req.message, thread_id=req.thread_id or "default")
+    except Exception as exc:  # the stream has already started; the client cannot get a 500
+        yield {"type": "error", "detail": f"{type(exc).__name__}: {exc}"}
 
 
 # -- studio (artifacts) --------------------------------------------------------
