@@ -22,7 +22,7 @@ from api.schemas import (
     SourceDetail,
     SourceInfo,
 )
-from agents import chat, research
+from agents import chat, research, studio
 from core import web
 from core.store import store
 
@@ -125,11 +125,15 @@ def run_chat(req: ChatRequest) -> ChatResponse:
 
 # -- studio (artifacts) --------------------------------------------------------
 
+def _status(key: str) -> str:
+    return "ready" if key in studio.KINDS else "planned"
+
+
 ARTIFACTS: list[ArtifactKind] = [
-    ArtifactKind(key="infographic", title="Infographic", icon="📊", status="planned"),
-    ArtifactKind(key="powerpoint", title="PowerPoint", icon="📑", status="planned"),
-    ArtifactKind(key="summary", title="Summary", icon="📄", status="planned"),
-    ArtifactKind(key="faq", title="FAQ", icon="❓", status="planned"),
+    ArtifactKind(key="infographic", title="Infographic", icon="📊", status=_status("infographic")),
+    ArtifactKind(key="powerpoint", title="PowerPoint", icon="📑", status=_status("powerpoint")),
+    ArtifactKind(key="summary", title="Summary", icon="📄", status=_status("summary")),
+    ArtifactKind(key="faq", title="FAQ", icon="❓", status=_status("faq")),
 ]
 
 _ARTIFACTS_BY_KEY = {a.key: a for a in ARTIFACTS}
@@ -140,10 +144,14 @@ def list_artifacts() -> list[ArtifactKind]:
 
 
 def generate_artifact(kind: str, impl: str) -> Note:
-    # Artifact generation lands with structured output; until then it's "coming soon".
-    artifact = _ARTIFACTS_BY_KEY.get(kind)
-    title = artifact.title if artifact else "This artifact"
-    raise ComingSoon(f"{title} generation is coming soon.")
+    """Build an artifact from the active sources and keep it as a note."""
+    if kind not in studio.KINDS:
+        artifact = _ARTIFACTS_BY_KEY.get(kind)
+        title = artifact.title if artifact else "This artifact"
+        raise ComingSoon(f"{title} generation is coming soon.")
+
+    result = studio.generate(kind)
+    return add_note(title=result.title, content=result.content)
 
 
 # -- notes ---------------------------------------------------------------------

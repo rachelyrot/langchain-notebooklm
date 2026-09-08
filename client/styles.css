@@ -130,6 +130,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .artifact .a-icon { font-size: 18px; }
 .artifact .a-title { font-size: 13px; }
 .artifact .a-badge { font-size: 10px; color: var(--warn); }
+.artifact.planned { opacity: .6; }
+.artifact.busy { cursor: progress; border-color: var(--accent); }
+.artifact.busy .a-title::after { content: " …"; color: var(--accent); }
+.artifact:disabled { cursor: progress; }
 .note-list { list-style: none; margin: 0; padding: 0 16px; display: flex; flex-direction: column; gap: 6px; }
 .note-list li { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; display: flex; justify-content: space-between; gap: 8px; }
 .note-list li:hover { box-shadow: var(--shadow); }

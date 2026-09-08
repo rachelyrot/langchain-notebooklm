@@ -308,18 +308,33 @@ async function loadArtifacts() {
     const btn = document.createElement("button");
     btn.className = "artifact";
     const badge = a.status === "planned" ? `<span class="a-badge">Soon</span>` : "";
+    if (a.status === "planned") btn.classList.add("planned");
     btn.innerHTML = `<span class="a-icon">${a.icon}</span>
       <span class="a-title">${escapeHtml(a.title)}</span>${badge}`;
-    btn.onclick = () => generateArtifact(a);
+    btn.onclick = () => generateArtifact(a, btn);
     grid.appendChild(btn);
   }
 }
 
-async function generateArtifact(a) {
+// A generated artifact is saved as a note and opened straight away — the agent returns a
+// structured object, so the note's markdown is rendered from fields, not from prose.
+async function generateArtifact(a, btn) {
+  if (a.status !== "ready") {
+    addMessage("system", `⚠ ${a.title} generation is coming soon.`);
+    return;
+  }
+  btn.disabled = true;
+  btn.classList.add("busy");
+  addMessage("system", `🛠 Building the ${a.title.toLowerCase()} from your active sources…`);
   try {
-    await api.send("POST", "/api/studio/generate", { kind: a.key });
+    const note = await api.send("POST", "/api/studio/generate", { kind: a.key });
+    await loadNotes();
+    openViewer(note.title, note.content);
   } catch (e) {
     addMessage("system", `⚠ ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("busy");
   }
 }
 

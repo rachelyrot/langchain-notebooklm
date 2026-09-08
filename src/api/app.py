@@ -43,6 +43,7 @@ from api.schemas import (
     ArtifactKind,
     ChatRequest,
     ChatResponse,
+    GenerateArtifactRequest,
     Note,
     ResearchDecision,
     ResearchRequest,
@@ -51,7 +52,7 @@ from api.schemas import (
     SourceDetail,
     SourceInfo,
 )
-from agents import research
+from agents import research, studio
 from core.web import WebUnavailable
 
 app = FastAPI(title="NotebookLM (LangChain learning project)")
@@ -168,11 +169,16 @@ def studio_artifacts() -> list[ArtifactKind]:
 
 
 @app.post("/api/studio/generate", response_model=Note)
-def studio_generate(req: dict) -> Note:
+def studio_generate(req: GenerateArtifactRequest) -> Note:
+    """Build an artifact from the active sources; it is saved as a note."""
     try:
-        return services.generate_artifact(req.get("kind", ""), req.get("impl", "A"))
+        return services.generate_artifact(req.kind, req.impl)
     except services.ComingSoon as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except studio.EmptyNotebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
 
 
 # -- notes ---------------------------------------------------------------------

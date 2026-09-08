@@ -2,12 +2,10 @@ from dataclasses import dataclass
 
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
-from langchain_core.documents import Document
 from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
-from langchain_core.tools import tool
 
-from core.store import SourceStore, store
-from core.sources import format_docs
+from agents.retrieval import make_retrieval_tools
+from core.store import store
 
 @dataclass
 class Answer:
@@ -19,30 +17,13 @@ MODEL = "anthropic:claude-sonnet-4-6"
 SYSTEM_PROMPT = "You are the assistant for a notebook of source documents"
 
 
-def _make_tools(store: SourceStore):
-
-    @tool(response_format="content_and_artifact")
-    def search_sources(query: str) -> tuple[str, list[Document]]:
-        """Find passages in the active sources that are relevant to a query"""
-        docs = store.search(query=query)
-        if not docs:
-            return "No relevant documents found in the active sources", []
-        return format_docs(docs), docs
-
-    # list sources
-
-    # get source by name
-
-    return [search_sources]
-
-
 # Built once: the checkpointer is what gives the agent its short-term memory, so it has
 # to outlive a single call (one thread of conversation per ``thread_id``).
 _agent = create_agent(
     model=MODEL,
     system_prompt=SYSTEM_PROMPT,
     checkpointer=InMemorySaver(),
-    tools=_make_tools(store),
+    tools=make_retrieval_tools(store),
 )
 
 
