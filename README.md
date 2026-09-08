@@ -4,22 +4,16 @@ A NotebookLM-style **grounded research assistant**, built as a project for learn
 **LangChain v1**. The code is organized as a finished product, by feature — not by
 development stage.
 
-
-## Stack
-- **Chat model:** Anthropic Claude (`anthropic:claude-sonnet-4-6` by default)
-- **Embeddings:** Cohere (`embed-multilingual-v3.0` by default)
-- Everything is provider-agnostic via env vars — see [`.env.example`](.env.example).
-
 ## The app
 
 A NotebookLM-style 3-panel workspace, with a real client/server split:
 
 ```
-┌ Sources ────┬ Chat ───────────────┬ Studio ──────┐
-│ add / upload│ grounded answers    │ artifacts    │
-│ select      │ with citations      │ + saved notes│
-│ view / del  │                     │              │
-└─────────────┴─────────────────────┴──────────────┘
+┌ Sources ────────┬ Chat ───────────────┬ Studio ──────┐
+│ paste / upload  │ grounded answers    │ artifacts    │
+│ research the web│ with citations      │ + saved notes│
+│ select / view   │                     │              │
+└─────────────────┴─────────────────────┴──────────────┘
 ```
 
 - **Sources** — add by pasting text, uploading `.md`/`.txt`, or **researching the web**:
@@ -29,40 +23,24 @@ A NotebookLM-style 3-panel workspace, with a real client/server split:
   (retrieval is scoped to them), view or remove a source.
 - **Chat** — the main product: a single conversational agent for grounded Q&A with
   citations and short-term memory; save any answer to a note.
-- **Studio** — generate artifacts: **Infographic · PowerPoint · Summary · FAQ**
-  (each will be its own standalone agent; PowerPoint uses a `.pptx` generation skill).
-
-## Structure
-
-```
-client/                 web client — single-page HTML/JS/CSS, no build step
-src/
-  app.py                CLI entry point (ask a question about local files)
-  agents/               one agent per feature
-    chat.py             the conversational chat agent (tools + short-term memory)
-    research.py         web research + the human-in-the-loop selection step
-  core/
-    sources.py          the Source model, chunking, prompt formatting
-    store.py            the live SourceStore: embeddings, retrieval, rate limiting
-    web.py              Firecrawl access behind two small dataclasses
-  api/                  FastAPI backend: schemas (contract), services, routes
-tests/                  offline: fake embeddings, fake Firecrawl, scripted model
-```
-
-The chat is one simple agent with the retrieval tools and memory. The Studio artifact
-generators will be standalone, stateless agents (invoked directly by the Studio, not part of
-the chat). Capabilities not built yet return `501` and the UI shows a "coming soon" notice.
+- **Studio** — the panel lists **Infographic · PowerPoint · Summary · FAQ**, but
+  generation is not built yet: `POST /api/studio/generate` returns `501` and the UI shows
+  a "coming soon" notice. Each will become its own standalone, stateless agent.
 
 ## Quick start
 
 ```bash
 uv sync
-cp .env.example .env         # ANTHROPIC_API_KEY + COHERE_API_KEY; FIRECRAWL_API_KEY for web research
+cp .env.example .env         # then fill in the keys
 uv run notebooklm-serve      # then open http://127.0.0.1:4040
 ```
 
+You need `ANTHROPIC_API_KEY` (chat) and `COHERE_API_KEY` (embeddings). `FIRECRAWL_API_KEY`
+is only needed for web research — without it the server still runs and everything else
+works; the Research button returns `503`.
+
 The notebook starts empty and lives in memory: add sources by pasting, uploading, or
-researching the web. Restarting the server clears it.
+researching the web. **Restarting the server clears everything.**
 
 CLI (no server) — ground an answer in local files:
 
@@ -70,10 +48,72 @@ CLI (no server) — ground an answer in local files:
 uv run notebooklm -s notes.md -s report.md "What changed between the two?"
 ```
 
-Tests (no API keys needed, nothing hits the network):
+Tests — no API keys needed, nothing hits the network:
 
 ```bash
 uv run pytest
+```
+
+## Stack
+
+- **Chat model:** Anthropic Claude — `anthropic:claude-sonnet-4-6`, set in
+  [`agents/chat.py`](src/agents/chat.py) and [`agents/research.py`](src/agents/research.py)
+- **Embeddings:** Cohere `embed-multilingual-v3.0`, in [`core/store.py`](src/core/store.py)
+- **Retrieval:** no vector database — chunks are embedded into numpy arrays in process
+  memory and ranked by cosine similarity
+- **Web:** Firecrawl (`search` / `scrape` / `crawl`)
+- **Backend:** FastAPI; **client:** plain HTML/JS/CSS, no build step
+
+### Configuration
+
+Only these environment variables are read (`.env` is loaded automatically):
+
+| Variable | Default | Used by |
+|----------|---------|---------|
+| `ANTHROPIC_API_KEY` | — | the chat and research agents |
+| `COHERE_API_KEY` | — | embeddings |
+| `FIRECRAWL_API_KEY` | — | web research only |
+| `NOTEBOOKLM_EMBEDDING_MODEL` | `embed-multilingual-v3.0` | `core/store.py` |
+| `NOTEBOOKLM_HOST` | `127.0.0.1` | `api/serve.py` |
+| `NOTEBOOKLM_PORT` | `4040` | `api/serve.py` |
+| `NOTEBOOKLM_RELOAD` | `0` | `api/serve.py` (`1` enables uvicorn reload) |
+
+The chat model and the embedding provider are **not** configurable by env var — change
+them in the files above.
+
+## Structure
+
+```
+client/                 web client — single-page HTML/JS/CSS, no build step
+src/
+  app.py                CLI: ask a question about local files
+  agents/
+    chat.py             the conversational chat agent (tools + short-term memory)
+    research.py         web research + the human-in-the-loop selection step
+  core/
+    sources.py          the Source model, chunking, prompt formatting
+    store.py            the live SourceStore: embeddings, retrieval, rate limiting
+    web.py              Firecrawl access behind two small dataclasses
+  api/
+    schemas.py          the API contract shared with the client
+    services.py         translates requests into the LangChain code
+    app.py              FastAPI routes + static client
+    serve.py            uvicorn entry point
+tests/                  offline: fake embeddings, fake Firecrawl, scripted model
+```
+
+### API
+
+```
+GET    /api/health
+GET    /api/sources                        POST /api/sources          (paste)
+POST   /api/sources/upload                 GET  /api/sources/{id}     (full content)
+PATCH  /api/sources/{id}   (toggle)        DELETE /api/sources/{id}
+POST   /api/sources/research               → pages to choose from (or a finished run)
+POST   /api/sources/research/{run_id}/decide  → accept the picks, drop the rest
+POST   /api/chat
+GET    /api/studio/artifacts               POST /api/studio/generate  (501)
+GET    /api/notes                          POST /api/notes            DELETE /api/notes/{id}
 ```
 
 ## Feature roadmap
@@ -91,16 +131,29 @@ uv run pytest
 | Event streaming | ⏳ planned |
 | Guardrails | ⏳ planned |
 | MCP | ⏳ planned |
+| Persistence (vector store + checkpointer) | ⏳ planned |
 
 ## Notes on the design
 
-- **Citations** come from the tool itself: `search_sources` is a
-  `content_and_artifact` tool, so the retrieved documents ride along on the `ToolMessage`
-  and the answer is credited without parsing text back out of the prompt.
+- **Citations come from the tool itself.** `search_sources` is a `content_and_artifact`
+  tool, so the retrieved documents ride along on the `ToolMessage` and the answer is
+  credited without parsing text back out of the prompt. Only the current turn counts —
+  with a checkpointer the whole thread comes back, so `_cited_sources` reads from the
+  last human message onward.
+- **A paused research run survives between HTTP requests.** The interrupt lives in the
+  agent's checkpointer under a `run_id`; the client sends the picks back to
+  `/decide`, which resumes the graph with `Command(resume={"decisions": [...]})`.
 - **Retrieval spreads across sources.** A scraped review can hold 200 chunks next to a
-  press release's 5, so a plain top-k would always quote the biggest document;
-  `MAX_PER_SOURCE` caps how much any one source can contribute.
-- **Embedding is rate limited** in `core/store.py` — several approved pages are indexed
-  from parallel tool calls, and a trial embedding key will 429 without pacing.
-- **Nothing persists.** Sources, chat memory and paused research runs all live in
-  process memory; a restart is a clean slate.
+  press release's 5, so a plain top-k would always quote the biggest document. Search
+  returns `TOP_K = 8` chunks with at most `MAX_PER_SOURCE = 3` from any one source, and
+  tops up beyond the cap only when there is nothing else left to add.
+- **Embedding is paced.** Several approved pages are indexed from parallel tool calls,
+  and the Cohere SDK fans its own batches out concurrently, so `core/store.py` serializes
+  the calls and holds them under a rolling budget of 80k tokens/minute. A single source is
+  truncated at `MAX_SOURCE_CHARS = 40_000` to bound what one page can cost. Chunks are
+  1000 characters with 150 of overlap.
+- **Provider errors are tool results, not exceptions.** A failed scrape or a rate-limited
+  embedding comes back to the model as a message, because raising would kill the whole
+  graph run and lose the pages that already succeeded.
+- **Nothing persists.** Sources, chat memory and paused research runs all live in process
+  memory; a restart is a clean slate.
