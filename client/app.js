@@ -44,6 +44,68 @@ function escapeHtml(s) {
   );
 }
 
+/* ---- markdown ---------------------------------------------------------------
+   Answers and artifacts come back as markdown, and showing the asterisks is worse
+   than showing nothing. This handles the subset the agents actually produce.
+
+   Everything is escaped *before* any tag is introduced, so no text from a source —
+   which is scraped off the open web — can become markup. */
+function renderMarkdown(text) {
+  const lines = escapeHtml(text).split("\n");
+  const html = [];
+  let list = null; // "ul" | "ol" while one is open
+
+  const closeList = () => {
+    if (list) html.push(`</${list}>`);
+    list = null;
+  };
+
+  const inline = (s) =>
+    s
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/(^|[\s(])_([^_\n]+)_/g, "$1<em>$2</em>");
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) {
+      closeList();
+      html.push("<hr>");
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      // never an <h1> inside a bubble, and never so small it reads as a footnote
+      const level = heading[1].length <= 2 ? 3 : 4;
+      html.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (bullet || numbered) {
+      const kind = bullet ? "ul" : "ol";
+      if (list !== kind) {
+        closeList();
+        html.push(`<${kind}>`);
+        list = kind;
+      }
+      html.push(`<li>${inline((bullet || numbered)[1])}</li>`);
+      continue;
+    }
+
+    closeList();
+    if (line.trim()) html.push(`<p>${inline(line)}</p>`);
+  }
+
+  closeList();
+  return html.join("");
+}
+
 /* ---- sources --------------------------------------------------------------- */
 
 async function loadSources() {
@@ -259,8 +321,8 @@ function addMessage(role, text, { pending = false } = {}) {
 }
 
 function decorateAnswer(div, data) {
-  div.className = "msg ai";
-  div.textContent = data.answer;
+  div.className = "msg ai rendered";
+  div.innerHTML = renderMarkdown(data.answer);
   if (data.citations?.length) {
     const meta = document.createElement("div");
     meta.className = "meta";
@@ -314,8 +376,9 @@ async function sendMessage(message) {
 
   let answer = "";
   const paint = () => {
-    bubble.className = "msg ai";
-    bubble.textContent = answer;
+    // rendered as it streams, so the answer does not visibly reflow when it finishes
+    bubble.className = "msg ai rendered";
+    bubble.innerHTML = renderMarkdown(answer);
     $("messages").scrollTop = $("messages").scrollHeight;
   };
 
@@ -409,7 +472,7 @@ async function generateArtifact(a, btn) {
         downloadLink(result.download_url, result.download_name, a.key)
       );
     } else {
-      openViewer(result.note.title, result.note.content);
+      openViewer(result.note.title, result.note.content, { markdown: true });
     }
   } catch (e) {
     addMessage("system", `⚠ ${e.message}`);
@@ -438,7 +501,7 @@ function renderNotes(notes) {
       await api.send("DELETE", `/api/notes/${n.id}`);
       loadNotes();
     };
-    li.querySelector(".n-title").onclick = () => openViewer(n.title, n.content);
+    li.querySelector(".n-title").onclick = () => openViewer(n.title, n.content, { markdown: true });
     ul.appendChild(li);
   }
 }
@@ -450,9 +513,16 @@ async function saveNote(content) {
 
 /* ---- viewer modal ---------------------------------------------------------- */
 
-function openViewer(title, content) {
+// Notes hold markdown; a source holds whatever text it was made of, shown as-is.
+function openViewer(title, content, { markdown = false } = {}) {
   $("viewer-title").textContent = title;
-  $("viewer-content").textContent = content;
+  const body = $("viewer-content");
+  body.className = markdown ? "viewer-content rendered" : "viewer-content";
+  if (markdown) {
+    body.innerHTML = renderMarkdown(content);
+  } else {
+    body.textContent = content;
+  }
   $("viewer").classList.remove("hidden");
   $("overlay").classList.remove("hidden");
 }

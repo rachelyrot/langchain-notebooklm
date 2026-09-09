@@ -106,6 +106,21 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .msg.system { align-self: center; background: #fff7ed; border: 1px solid #fed7aa; color: var(--warn); font-size: 13px; box-shadow: none; }
 .msg.pending { color: var(--muted); font-style: italic; }
 
+/* rendered markdown, in a chat bubble or in the viewer */
+.rendered { white-space: normal; }
+.rendered > :first-child { margin-top: 0; }
+.rendered > :last-child { margin-bottom: 0; }
+.rendered p { margin: 0 0 10px; }
+.rendered h3, .rendered h4, .rendered h5, .rendered h6 { margin: 16px 0 8px; line-height: 1.35; }
+.rendered h3 { font-size: 16px; }
+.rendered h4 { font-size: 14px; }
+.rendered h5, .rendered h6 { font-size: 13px; color: var(--muted); }
+.rendered ul, .rendered ol { margin: 0 0 10px; padding-left: 22px; }
+.rendered li { margin-bottom: 4px; }
+.rendered hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.rendered code { background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; }
+.rendered strong { font-weight: 650; }
+
 .meta { margin-top: 10px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 8px; }
 .meta .label { color: var(--accent); }
 .chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; margin: 2px 4px 0 0; font-size: 11px; }
@@ -147,6 +162,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .modal-head h3 { margin: 0; font-size: 15px; }
 .viewer-content { margin: 0; padding: 18px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 13px; line-height: 1.5; color: var(--text); background: var(--panel-2); }
+.viewer-content.rendered { font-family: inherit; font-size: 14px; line-height: 1.6; background: var(--panel); }
 
 /* research picker — the agent proposes, the person decides */
 .picker-note { margin: 12px 18px 0; }
