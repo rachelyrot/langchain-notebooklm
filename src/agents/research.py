@@ -22,6 +22,7 @@ from langchain_core.messages import AnyMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.types import Command
 
+from core.mcp import load_tools
 from core.memory import checkpointer
 from core.sources import Source
 from core.store import store
@@ -53,7 +54,11 @@ contributes and which angle it covers — that line is what the person reads whe
 is the person's decision, not an error: never re-propose a rejected page, and never \
 propose a replacement for it unless they ask.
 5. Report. Finish with a short plain-text summary: which angles you searched, what was \
-added, and anything the searches did not turn up. Do not use markdown headings."""
+added, and anything the searches did not turn up. Do not use markdown headings.
+
+You may also have tools from connected MCP servers. Use them when they can reach material \
+the open web cannot, but remember that only `scrape_page` and `crawl_site` add anything to \
+the notebook — whatever else you find, propose it through those."""
 
 
 @dataclass
@@ -181,10 +186,13 @@ def _describe(tool_call, state, runtime) -> str:
 
 _review = InterruptOnConfig(allowed_decisions=["approve", "reject"], description=_describe)
 
+# Tools from MCP servers, when any are configured, sit alongside the built-in ones: the
+# agent may consult them while deciding what to propose, but only the tools above can add
+# a source, so the human-in-the-loop step cannot be bypassed by a borrowed tool.
 _agent = create_agent(
     model=MODEL,
     system_prompt=SYSTEM_PROMPT,
-    tools=[web_search, scrape_page, crawl_site],
+    tools=[web_search, scrape_page, crawl_site, *load_tools()],
     middleware=[
         HumanInTheLoopMiddleware(interrupt_on={"scrape_page": _review, "crawl_site": _review})
     ],

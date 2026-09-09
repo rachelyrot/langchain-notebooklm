@@ -5,6 +5,8 @@ The model is scripted, so the whole interrupt/resume cycle runs offline.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware

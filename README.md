@@ -78,6 +78,7 @@ Only these environment variables are read (`.env` is loaded automatically):
 | `FIRECRAWL_API_KEY` | — | web research only |
 | `NOTEBOOKLM_EMBEDDING_MODEL` | `embed-multilingual-v3.0` | `core/store.py` |
 | `NOTEBOOKLM_DATA_DIR` | `data` | where the notebook is kept on disk |
+| `NOTEBOOKLM_MCP_SERVERS` | — | JSON `{name: connection}`; their tools go to the research agent |
 | `NOTEBOOKLM_HOST` | `127.0.0.1` | `api/serve.py` |
 | `NOTEBOOKLM_PORT` | `4040` | `api/serve.py` |
 | `NOTEBOOKLM_RELOAD` | `0` | `api/serve.py` (`1` enables uvicorn reload) |
@@ -101,6 +102,7 @@ src/
     sources.py          the Source model, chunking, prompt formatting
     store.py            the SourceStore: Chroma, retrieval, rate limiting
     memory.py           the SQLite checkpointer both agents share
+    mcp.py              tools borrowed from MCP servers, made callable from sync code
     web.py              Firecrawl access behind two small dataclasses
   api/
     schemas.py          the API contract shared with the client
@@ -140,7 +142,7 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
 | Event streaming | ✅ done — `POST /api/chat/stream`, server-sent events |
 | Guardrails | ✅ done — `agents/guardrails.py` |
 | Persistence | ✅ done — Chroma + a SQLite checkpointer |
-| MCP | ⏳ planned |
+| MCP | ✅ done — `core/mcp.py`, tools borrowed by the research agent |
 
 ## Notes on the design
 
@@ -164,6 +166,16 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
   is queried for its own best chunks and the results are merged — one global query would
   let the big document fill the *candidate* list, crowding the others out one level above
   the cap. The query is embedded once and reused across those queries.
+- **Borrowed tools go to the research agent, never the chat agent.** The chat agent must
+  answer only from the notebook, and `RequireGroundingMiddleware` enforces that — handing
+  it outside tools would set the guardrail against the tools. Research is the part whose
+  job is to reach outward. MCP tools also cannot add a source: only `scrape_page` and
+  `crawl_site` can, so a borrowed tool cannot slip past the human-in-the-loop step.
+- **MCP tools are async-only, and this app is not.** `core/mcp.py` wraps each one with a
+  synchronous implementation. Making the research path async instead looked cleaner until
+  `SqliteSaver` turned out to have no async methods either — the change would have run
+  from the tool all the way to the checkpointer. A test asserts the raw adapter tool still
+  raises on `invoke`, so the wrapper cannot be mistaken for ceremony and deleted.
 - **Nothing about a paused run lives in a variable.** The pending proposals are read back
   out of the checkpointer, so a research run waiting for your decision survives a restart.
 - **Embedding is paced.** Several approved pages are indexed from parallel tool calls,
