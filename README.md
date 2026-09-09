@@ -1,8 +1,17 @@
 # langchain-notebooklm
 
+[![tests](https://github.com/rachelyrot/langchain-notebooklm/actions/workflows/tests.yml/badge.svg)](https://github.com/rachelyrot/langchain-notebooklm/actions/workflows/tests.yml)
+
 A NotebookLM-style **grounded research assistant**, built as a project for learning
 **LangChain v1**. The code is organized as a finished product, by feature — not by
 development stage.
+
+Ask questions about a set of sources and get answers that cite them; build the source set
+by pasting, uploading, or sending an agent to research a topic on the open web — where
+*you* choose which pages it keeps. Turn the whole notebook into a summary, a FAQ, an
+infographic or a slide deck.
+
+![The three-panel workspace](docs/screenshot.png)
 
 ## The app
 
@@ -192,6 +201,10 @@ GET    /api/notes                          POST /api/notes            DELETE /ap
   already left for the browser — the stream ends with a `replace` event and the client
   drops what it showed. Anything that rewrites an answer needs this, or streaming and
   guardrails quietly contradict each other.
+- **One notebook, one process.** There is a single `SourceStore` and no notion of users:
+  this is a tool you run for yourself, not a service. A deliberate limit rather than an
+  oversight — multi-tenancy would change the store, the checkpointer and the API at once,
+  and buy nothing for the way the app is actually used.
 - **Guardrails protect the promise, not the model.** An answer the notebook was never
   consulted for is refused outright: it would look like every other answer while being a
   different product. Emails and card numbers are redacted from answers and from retrieved
